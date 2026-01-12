@@ -63,12 +63,12 @@
         <tbody>
             {% for user in user_requests %}
             <tr>
-                <td>{{ user.Username }}</td>
+                <td>{{ user.username }}</td>
                 <td>
-                    <form action="/approve_user/{{ user.ID_User }}" method="get" style="display:inline;">
+                    <form action="/approve_user/{{ user.id_user }}" method="get" style="display:inline;">
                         <button type="submit" class="btn-accept">Accept</button>
                     </form>
-                    <form action="/reject_user/{{ user.ID_User }}" method="get" style="display:inline;">
+                    <form action="/reject_user/{{ user.id_user }}" method="get" style="display:inline;">
                         <button type="submit" class="btn-reject">Reject</button>
                     </form>
                 </td>

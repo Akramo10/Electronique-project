@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify, send_file
-from flask_mysqldb import MySQL
-from config import SECRET_KEY, MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
-import MySQLdb.cursors
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from config import SECRET_KEY, POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT
 import pandas as pd
 import io
 
@@ -9,15 +9,18 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Configuration de la base de données MySQL
-app.config['MYSQL_HOST'] = MYSQL_HOST
-app.config['MYSQL_USER'] = MYSQL_USER
-app.config['MYSQL_PASSWORD'] = MYSQL_PASSWORD
-app.config['MYSQL_DB'] = MYSQL_DB
-mysql = MySQL(app)
-
 # Clé secrète pour sécuriser les sessions
 app.secret_key = SECRET_KEY
+
+# Fonction pour obtenir une connexion PostgreSQL
+def get_db_connection():
+    return psycopg2.connect(
+        host=POSTGRES_HOST,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        database=POSTGRES_DB,
+        port=POSTGRES_PORT
+    )
 
 @app.route('/', methods=['GET', 'POST'])
 @app.route('/login', methods=['GET', 'POST'])
@@ -34,14 +37,15 @@ def login():
                 session['username'] = 'ADMIN'
                 return redirect(url_for('ADMIN'))
 
-            cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            conn = get_db_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             try:
-                cursor.execute('SELECT * FROM userinterface WHERE Username = %s', (username,))
+                cursor.execute('SELECT * FROM userinterface WHERE username = %s', (username,))
                 user = cursor.fetchone()
-                if user and user['Password'] == password and user['Approve'] == 1:
+                if user and user['password'] == password and user['approve'] == True:
                     session['loggedin'] = True
-                    session['id'] = user['ID_User']
-                    session['username'] = user['Username']
+                    session['id'] = user['id_user']
+                    session['username'] = user['username']
                     return redirect(url_for('dashboard'))
                 else:
                     error_msg = 'Nom d\'utilisateur ou mot de passe incorrect!'
@@ -50,6 +54,7 @@ def login():
                 print(f"Database error: {e}")
             finally:
                 cursor.close()
+                conn.close()
         else:
             error_msg = 'Veuillez fournir un nom d\'utilisateur et un mot de passe.'
 
@@ -58,15 +63,17 @@ def login():
 @app.route('/ADMIN')
 def ADMIN():
     if 'loggedin' in session and session['username'] == 'ADMIN':
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
-            cursor.execute('SELECT * FROM userinterface WHERE Approve = 0')
+            cursor.execute('SELECT * FROM userinterface WHERE approve = false')
             user_requests = cursor.fetchall()
             return render_template('admin.html', user_requests=user_requests)
         except Exception as e:
             print(f"Database error: {e}")
         finally:
             cursor.close()
+            conn.close()
     return redirect(url_for('login'))
 
 
@@ -75,29 +82,33 @@ def ADMIN():
 @app.route('/approve_user/<int:user_id>', methods=['GET'])
 def approve_user(user_id):
     if 'loggedin' in session and session['username'] == 'ADMIN':
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
-            cursor.execute('UPDATE userinterface SET Approve = 1 WHERE ID_User = %s', (user_id,))
-            mysql.connection.commit()
+            cursor.execute('UPDATE userinterface SET approve = true WHERE id_user = %s', (user_id,))
+            conn.commit()
             return redirect(url_for('ADMIN'))
         except Exception as e:
             print(f"Database error: {e}")
         finally:
             cursor.close()
+            conn.close()
     return redirect(url_for('login'))
 
 @app.route('/reject_user/<int:user_id>', methods=['GET'])
 def reject_user(user_id):
     if 'loggedin' in session and session['username'] == 'ADMIN':
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
-            cursor.execute('DELETE FROM userinterface WHERE ID_User = %s', (user_id,))
-            mysql.connection.commit()
+            cursor.execute('DELETE FROM userinterface WHERE id_user = %s', (user_id,))
+            conn.commit()
             return redirect(url_for('ADMIN'))
         except Exception as e:
             print(f"Database error: {e}")
         finally:
             cursor.close()
+            conn.close()
     return redirect(url_for('login'))
 
 @app.route('/dashboard')
@@ -112,10 +123,12 @@ def register():
         username = request.form['username']
         password = request.form['password']
 
-        cursor = mysql.connection.cursor()
-        cursor.execute('INSERT INTO userinterface (Username, Password, Approve) VALUES (%s, %s, %s)', (username, password, 0))
-        mysql.connection.commit()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO userinterface (username, password, approve) VALUES (%s, %s, %s)', (username, password, False))
+        conn.commit()
         cursor.close()
+        conn.close()
 
         return 'Inscription réussie!'
 
@@ -137,20 +150,22 @@ def view_history():
         date_start = request.form.get('date_start')
         date_end = request.form.get('date_end')
 
-        query = """
-            SELECT Employe.nom, Employe.prenom, historique.Date_Entree, historique.Date_Sortie
-            FROM historique
-            INNER JOIN Employe ON historique.ID_Employe = Employe.ID_Employe
-            WHERE (%(name)s IS NULL OR Employe.nom LIKE %(name)s)
-            AND (%(date_start)s IS NULL OR (historique.Date_Entree >= %(date_start)s AND historique.Date_Sortie <= %(date_end)s))
-        """
-
         params = {'name': f"%{name}%" if name else None, 'date_start': date_start, 'date_end': date_end}
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Adaptation de la requête pour PostgreSQL
+        query = """
+            SELECT employe.nom, employe.prenom, historique.date_entree, historique.date_sortie
+            FROM historique
+            INNER JOIN employe ON historique.id_employe = employe.id_employe
+            WHERE (%(name)s IS NULL OR employe.nom LIKE %(name)s)
+            AND (%(date_start)s IS NULL OR (historique.date_entree >= %(date_start)s AND historique.date_sortie <= %(date_end)s))
+        """
         cur.execute(query, params)
         data = cur.fetchall()
         cur.close()
+        conn.close()
 
         if request.form.get('export') == 'true':
             if data:
@@ -178,16 +193,18 @@ def add_employee():
         carte_rfid = request.form.get('carte_rfid')
 
         if nom and prenom and carte_rfid:
-            cursor = mysql.connection.cursor()
+            conn = get_db_connection()
+            cursor = conn.cursor()
             try:
-                cursor.execute('INSERT INTO employe (Nom, Prenom, Carte_RFID) VALUES (%s, %s, %s)', (nom, prenom, carte_rfid))
-                mysql.connection.commit()
+                cursor.execute('INSERT INTO employe (nom, prenom, carte_rfid) VALUES (%s, %s, %s)', (nom, prenom, carte_rfid))
+                conn.commit()
                 success_msg = 'Employé ajouté avec succès!'
             except Exception as e:
                 error_msg = 'Une erreur s\'est produite lors de l\'ajout de l\'employé.'
                 print(f"Database error: {e}")
             finally:
                 cursor.close()
+                conn.close()
         else:
             error_msg = 'Veuillez remplir tous les champs.'
 
@@ -198,33 +215,39 @@ def all_users():
     if 'loggedin' not in session:
         return redirect(url_for('login'))
 
-    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     try:
         if request.method == 'POST':
             search_query = request.form.get('search_query', '')
             # Sanitize input to prevent SQL injection
             search_query = '%' + search_query + '%'
-            query = 'SELECT * FROM employe WHERE Nom LIKE %s OR Prenom LIKE %s OR Carte_RFID LIKE %s'
+            query = 'SELECT * FROM employe WHERE nom LIKE %s OR prenom LIKE %s OR carte_rfid LIKE %s'
             cursor.execute(query, (search_query, search_query, search_query))
         else:
             cursor.execute('SELECT * FROM employe')
         
         users = cursor.fetchall()
         cursor.close()
+        conn.close()
 
         return render_template('all_users.html', users=users)
     except Exception as e:
         # Handle exceptions gracefully
+        cursor.close()
+        conn.close()
         return "An error occurred: " + str(e)
 @app.route('/delete_user/<int:id>', methods=['POST'])
 def delete_user(id):
     if 'loggedin' not in session:
         return redirect(url_for('login'))
 
-    cursor = mysql.connection.cursor()
-    cursor.execute('DELETE FROM employe WHERE ID_Employe = %s', (id,))
-    mysql.connection.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM employe WHERE id_employe = %s', (id,))
+    conn.commit()
     cursor.close()
+    conn.close()
 
     return redirect(url_for('all_users'))
 
@@ -233,20 +256,23 @@ def edit_user(id):
     if 'loggedin' not in session:
         return redirect(url_for('login'))
 
-    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     if request.method == 'POST':
         nom = request.form.get('nom')
         prenom = request.form.get('prenom')
         carte_rfid = request.form.get('carte_rfid')
-        cursor.execute('UPDATE employe SET Nom = %s, Prenom = %s, Carte_RFID = %s WHERE ID_Employe = %s',
+        cursor.execute('UPDATE employe SET nom = %s, prenom = %s, carte_rfid = %s WHERE id_employe = %s',
                        (nom, prenom, carte_rfid, id))
-        mysql.connection.commit()
+        conn.commit()
         cursor.close()
+        conn.close()
         return redirect(url_for('all_users'))
     else:
-        cursor.execute('SELECT * FROM employe WHERE ID_Employe = %s', (id,))
+        cursor.execute('SELECT * FROM employe WHERE id_employe = %s', (id,))
         user = cursor.fetchone()
         cursor.close()
+        conn.close()
         return render_template('edit_user.html', user=user)
 
 @app.route('/check_rfid', methods=['POST'])
@@ -257,35 +283,37 @@ def check_rfid():
     if not uid:
         return jsonify({"status": "error", "message": "No UID provided"}), 400
 
-    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     try:
         # Check if the RFID is authorized
-        cursor.execute('SELECT ID_Employe FROM employe WHERE Carte_RFID = %s', (uid,))
+        cursor.execute('SELECT id_employe FROM employe WHERE carte_rfid = %s', (uid,))
         result = cursor.fetchone()
         if result:
-            id_employe = result['ID_Employe']
+            id_employe = result['id_employe']
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # Check for an existing entry with a null Date_Sortie
-            cursor.execute('SELECT ID_Historique FROM historique WHERE ID_Employe = %s AND Date_Sortie IS NULL', (id_employe,))
+            # Check for an existing entry with a null date_sortie
+            cursor.execute('SELECT id_historique FROM historique WHERE id_employe = %s AND date_sortie IS NULL', (id_employe,))
             existing_entry = cursor.fetchone()
 
             if existing_entry:
-                # Update the existing entry with the current time as Date_Sortie
-                cursor.execute('UPDATE historique SET Date_Sortie = %s WHERE ID_Historique = %s', (current_time, existing_entry['ID_Historique']))
+                # Update the existing entry with the current time as date_sortie
+                cursor.execute('UPDATE historique SET date_sortie = %s WHERE id_historique = %s', (current_time, existing_entry['id_historique']))
             else:
-                # Insert a new entry with the current time as Date_Entree
-                cursor.execute('INSERT INTO historique (ID_Employe, Date_Entree) VALUES (%s, %s)', (id_employe, current_time))
+                # Insert a new entry with the current time as date_entree
+                cursor.execute('INSERT INTO historique (id_employe, date_entree) VALUES (%s, %s)', (id_employe, current_time))
             
-            mysql.connection.commit()
+            conn.commit()
 
-            return jsonify({"status": "authorized", "ID_Employe": id_employe})
+            return jsonify({"status": "authorized", "id_employe": id_employe})
         else:
             return jsonify({"status": "unauthorized"}), 401
-    except MySQLdb.Error as e:
+    except psycopg2.Error as e:
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         cursor.close()
+        conn.close()
 
 @app.route('/log_rfid', methods=['POST'])
 def log_rfid():
