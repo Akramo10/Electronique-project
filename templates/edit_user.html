@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modifier l'employé</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f7f7f7;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        form {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Modifier l'employé</h1>
+    <form method="post">
+        <label for="nom">Nom:</label>
+        <input type="text" id="nom" name="nom" value="{{ user.Nom }}" required><br><br>
+        <label for="prenom">Prénom:</label>
+        <input type="text" id="prenom" name="prenom" value="{{ user.Prenom }}" required><br><br>
+        <label for="carte_rfid">Carte RFID:</label>
+        <input type="text" id="carte_rfid" name="carte_rfid" value="{{ user.Carte_RFID }}" required><br><br>
+        <button type="submit">Enregistrer les modifications</button>
+    </form>
+</body>
+</html>
