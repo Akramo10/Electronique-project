@@ -1,0 +1,12 @@
+import secrets
+
+SECRET_KEY = secrets.token_hex(16)
+print(SECRET_KEY)
+
+# Configuration PostgreSQL distante
+POSTGRES_HOST = "51.20.7.106"
+POSTGRES_USER = "akram"
+POSTGRES_PASSWORD = "AWS-Stage"
+POSTGRES_DB = "rfid1"
+POSTGRES_PORT = 5432
+
